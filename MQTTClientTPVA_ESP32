@@ -1,0 +1,244 @@
+/*
+ Reconnecting MQTT example - non-blocking
+
+ This sketch demonstrates how to keep the client connected
+ using a non-blocking reconnect function. If the client loses
+ its connection, it attempts to reconnect every 5 seconds
+ without blocking the main loop.
+
+*/
+
+//#include <SPI.h>
+//#include <Ethernet.h>
+
+#define DeviceNumber "5"
+
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
+#include <SoftwareSerial.h>
+
+//#include "C:\Users\user\Documents\Arduino\mqtt_esp8266My\espSerialRead.ino"
+
+const char* ssid = "DIR-300_kf";
+const char* password = "19650704";
+const char* mqtt_server = "test.mosquitto.org";
+//const char* mqtt_server = "192.168.1.27";
+//const char* mqtt_server = "91.201.254.165";  //AirMaster
+
+WiFiClient espClient;
+PubSubClient client(espClient);
+SoftwareSerial Sserial;
+
+unsigned long lastMsg = 0;
+#define MSG_BUFFER_SIZE  (50)
+char msg[MSG_BUFFER_SIZE];
+int value = 0;
+
+long lastReconnectAttempt = 0;
+char idClient[] = "ESP8266ClientKf" DeviceNumber;
+char userName[] = "Kf1965";
+char pass[] = "a116ek";
+char rstTopic[] =     "avi/reset/" DeviceNumber;  // to Subscribe
+char tim0Topic[] =    "avi/tim0/" DeviceNumber;
+char tim1Topic[] =    "avi/tim1/" DeviceNumber;
+char tim2Topic[] =    "avi/tim2/" DeviceNumber;
+char tim3Topic[] =    "avi/tim3/" DeviceNumber;
+char basketTopic[] =  "avi/basket/" DeviceNumber;
+char saveTopic[] =    "avi/save/" DeviceNumber;
+char wildCardTopic[] ="avi/+/" DeviceNumber;
+
+char CCTopic[] =      "kf1965/count/" DeviceNumber;   // to public
+char msTopic[] =      "kf1965/times/" DeviceNumber;   // + "0";
+char RSSITopic[] =    "kf1965/RSSI/" DeviceNumber;
+
+long CC;
+long TT;
+
+void setup_wifi() {
+  delay(10);
+  // We start by connecting to a WiFi network
+  Serial.println();
+  Serial.print("Connecting to ");
+  Serial.println(ssid);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("WiFi connected. RSSI:"); Serial.println(WiFi.RSSI());
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+} //setup_wifi
+
+void SerialReadArdu() 
+{
+char  incomingByte;
+
+if (Sserial.available() > 0) 
+  {    // read the incoming byte:
+  incomingByte = Sserial.read();
+  }
+ 
+if (incomingByte == 'R')
+    { 
+    CC = Sserial.parseInt();
+ //   Serial.print("CCounter: ");    Serial.println(CC, DEC);
+    }
+    
+if (incomingByte == 'T')
+    { 
+    TT = Sserial.parseInt();
+//    Serial.print("TimesDark: ms ");    Serial.println(TT, DEC);
+    }
+//delay(1000);
+}  //serialReadArdu
+
+
+void callback(char* topic, byte* payload, unsigned int length) 
+{
+/*  парсим топик и передаем в арду соответствующую команду
+*/
+digitalWrite(LED_BUILTIN, LOW);   // Turn the LED on (Note that LOW is the voltage level
+
+String topicStr(topic);
+
+ Serial.print(topicStr+" : ");            // сброс счетчика
+      for (int i = 0; i < length; i++) 
+        Serial.print((char)payload[i]);               // 
+ Serial.println();
+
+if (topicStr == rstTopic) 
+  {
+  Sserial.print('R');            // сброс счетчика
+      for (int i = 0; i < length; i++) 
+        Sserial.print((char)payload[i]);               // 
+  Sserial.println();
+  }
+else if(topicStr == tim0Topic) 
+  {
+  Sserial.print('Z'); 
+  for (int i = 0; i < length; i++) 
+     Sserial.print((char)payload[i]);               // Time zero
+  Sserial.println();  
+  }
+else if(topicStr == tim1Topic) 
+  {
+  Sserial.print('O');                   // Time One
+  
+  for (int i = 0; i < length; i++) 
+     Sserial.print((char)payload[i]);
+  
+  Sserial.println();
+  }
+ 
+else if(topicStr == tim2Topic) 
+  {
+  Sserial.print('T');                   // Time Two
+  for (int i = 0; i < length; i++) 
+     Sserial.print((char)payload[i]);
+  
+  Sserial.println();
+  }  
+
+else if(topicStr == tim3Topic) 
+  {
+  Sserial.print('F');                   // Time F(Th)re
+  
+  for (int i = 0; i < length; i++) 
+     Sserial.print((char)payload[i]);
+  
+  Sserial.println();
+  }
+  
+else if(topicStr == saveTopic) 
+  { if ((char)payload[0] == '1')
+      Sserial.println("S1");      // Save
+  } 
+
+else if(topicStr == basketTopic) 
+  {
+  Sserial.print('B');                   // Basket
+  
+  for (int i = 0; i < length; i++) 
+     Sserial.print((char)payload[i]);
+  
+  Sserial.println();
+  } ;
+
+digitalWrite(LED_BUILTIN, HIGH);  // Turn the LED off by making the voltage HIGH
+}  //callback
+
+
+boolean reconnect() {
+  if (client.connect(idClient,userName,pass)) 
+    {
+    // Once connected, publish an announcement...
+    Serial.print("Server connected ok , rc="); Serial.println(client.state());
+    // ... and resubscribe
+    client.subscribe(wildCardTopic);         //подписываемся на ресет
+    }
+  else
+    {
+    Serial.print("Server not connected, rc="); Serial.println(client.state());
+    }
+  return client.connected();
+}
+
+void setup()
+{ 
+  pinMode(LED_BUILTIN, OUTPUT);     // Initialize the BUILTIN_LED pin as an output
+  Serial.begin(115200);
+  Sserial.begin(9600, SWSERIAL_8N1, D5, D6, false );  // D5 - RX    D6 - TX invert = false
+  
+  setup_wifi();
+  client.setServer(mqtt_server, 1883);
+  client.setCallback(callback);
+  client.subscribe(wildCardTopic);         //подписываемся на топики
+  delay(1500);
+  lastReconnectAttempt = 0;
+} //setup
+
+
+void loop()
+{
+long now = millis();
+if (now - lastReconnectAttempt > 5000) // раз в 5сек
+  {
+  if (client.connected()) // Client connected
+    {
+    char bufferCC[10];         //the ASCII of the integer will be stored in this char array
+    itoa(CC,bufferCC,10); //(integer, yourBuffer, base) 
+    client.publish(CCTopic,bufferCC);
+    
+    char bufferTT[10];         //the ASCII of the integer will be stored in this char array
+    itoa(TT,bufferTT,10); //(integer, yourBuffer, base) 
+    client.publish(msTopic,bufferTT);
+
+    char bufferRSSI[10];         //the ASCII of the integer will be stored in this char array
+    itoa(WiFi.RSSI(),bufferRSSI,10); //(integer, yourBuffer, base) 
+    client.publish(RSSITopic,bufferRSSI);
+    
+/*    Serial.print(" Публикуем  CC: "); Serial.println(bufferCC);
+    Serial.print(" Публикуем  TT: "); Serial.println(bufferTT);
+    Serial.print(" Публикуем RSSI:"); Serial.println(bufferRSSI);
+ */
+    client.loop(); 
+    lastReconnectAttempt = now;
+    }  
+  else// Attempt to reconnect 
+    {
+    if (reconnect())
+        {
+        lastReconnectAttempt = 0;
+        }
+    
+    } //else 
+  }   //   if > 5000
+
+SerialReadArdu();
+
+} // loop
